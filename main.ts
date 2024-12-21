@@ -1,13 +1,23 @@
-import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting } from 'obsidian';
+import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting, normalizePath } from 'obsidian';
 
 // Remember to rename these classes and interfaces!
 
 interface MyPluginSettings {
-	mySetting: string;
+	chessUsername: string;
+	folder: string;
+	currentYear: string;
+	currentMonth: string;
+	gameLimitYear: string;
+	gameLimitMonth: string;
 }
 
 const DEFAULT_SETTINGS: MyPluginSettings = {
-	mySetting: 'default'
+	chessUsername: '',
+	folder: '',
+	currentYear: '',
+	currentMonth: '',
+	gameLimitYear: '',
+	gameLimitMonth: '',
 }
 
 export default class MyPlugin extends Plugin {
@@ -17,16 +27,30 @@ export default class MyPlugin extends Plugin {
 		await this.loadSettings();
 
 		// This creates an icon in the left ribbon.
-		const ribbonIconEl = this.addRibbonIcon('dice', 'Sample Plugin', (evt: MouseEvent) => {
+		const ribbonIconEl = this.addRibbonIcon('crown', 'Pull games', async (evt: MouseEvent) => {
 			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
+			this.setDate();
+			new Notice('Downloading games...');
+			//console.log("Current year/month:", this.settings.currentYear, this.settings.currentMonth);
+			//console.log("Game limit year/month:", this.settings.gameLimitYear, this.settings.gameLimitMonth);
+			const gameArchives = await this.fetchGameArchives();
+			for (let archive of gameArchives['archives']) {
+				const parsedDates = this.parseGameArchiveDates(archive);
+				if (this.satisfiesDateCondition(parsedDates)) {
+					//console.log(archive);
+					const pgnData = await this.fetchMonthlyGames(parsedDates[0], parsedDates[1]) as string;
+					await this.saveFileToPgnFolder(parsedDates[0], parsedDates[1], pgnData);
+					await this.savePgnSectionsToMd(pgnData);
+				}
+			}
+
 		});
 		// Perform additional things with the ribbon
 		ribbonIconEl.addClass('my-plugin-ribbon-class');
 
 		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status Bar Text');
+		//const statusBarItemEl = this.addStatusBarItem();
+		//statusBarItemEl.setText('Status Bar Text');
 
 		// This adds a simple command that can be triggered anywhere
 		this.addCommand({
@@ -78,6 +102,87 @@ export default class MyPlugin extends Plugin {
 		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
 	}
 
+	// ------------------------- Utils
+	fetchGameArchives = async () => {
+		const response = await fetch(`https://api.chess.com/pub/player/${this.settings.chessUsername}/games/archives`);
+		if (response.ok) {
+			return await response.json();
+		}
+	}
+
+	satisfiesDateCondition = (archiveDate: any) => {
+		if ((Number(archiveDate[0]) >= Number(this.settings.gameLimitYear))) {
+			if ((Number(archiveDate[0]) == Number(this.settings.gameLimitYear))) {
+				if (Number(archiveDate[1]) >= Number(this.settings.gameLimitMonth)) {
+					return true;
+				}
+			}
+			else if ((Number(archiveDate[0]) > Number(this.settings.gameLimitYear))) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	parseGameArchiveDates = (archive: string) => {
+		const dateString = archive.slice(-7);
+		return dateString.split('/');
+	}
+
+	fetchMonthlyGames = async (year: string, month: string) => {
+		const response = await fetch(`https://api.chess.com/pub/player/${this.settings.chessUsername}/games/${year}/${month}/pgn`);
+
+		if (response.ok) {
+			return await (await response.blob()).text();
+		}
+	}
+
+	saveFileToPgnFolder = async (year: string, month: string, text: string) => {
+		const fileName = `${year}-${month}.pgn`;
+		console.log(fileName);
+		if (!await this.app.vault.adapter.exists(this.settings.folder + '/pgn')) {
+			await this.app.vault.adapter.mkdir(this.settings.folder + '/pgn');
+		}
+		const pgnFilePath = normalizePath(this.settings.folder + '/pgn/' + fileName);
+		//console.log("Pgn folder path", pgnFilePath);
+		await this.app.vault.adapter.write(pgnFilePath, text);
+		return true;
+	}
+
+	savePgnSectionsToMd = async (pgnText: string) => {
+    // Split the PGN file into separate games
+    const games = pgnText.split('\n\n\n');
+
+    // Log or return the parsed games
+    console.log(`Found ${games.length} games.`);
+
+		// Save to separate files
+		for (let game of games) {
+	    // Extract White and Black usernames
+			const whiteMatch = game.match(/\[White\s+"(.+?)"\]/) as RegExpMatchArray;
+			const blackMatch = game.match(/\[Black\s+"(.+?)"\]/) as RegExpMatchArray;
+
+			// Generate filename
+			if (!await this.app.vault.adapter.exists(this.settings.folder)) {
+				await this.app.vault.adapter.mkdir(this.settings.folder);
+			}
+			const fileName = `${whiteMatch[1]}-${blackMatch[1]}.md`;
+			let mdFilePath = normalizePath(this.settings.folder + '/' + fileName);
+
+			// Write to file
+			await this.app.vault.adapter.write(mdFilePath, '```');
+			await this.app.vault.adapter.append(mdFilePath, game);
+			await this.app.vault.adapter.append(mdFilePath, '```');
+		}
+	}
+
+	setDate = () => {
+		const today = new Date();
+		this.settings.currentYear = today.getFullYear().toString();
+		this.settings.currentMonth = (today.getMonth() + 1).toString();
+	}
+	// ------------------------- Utils
+
 	onunload() {
 
 	}
@@ -121,13 +226,46 @@ class SampleSettingTab extends PluginSettingTab {
 		containerEl.empty();
 
 		new Setting(containerEl)
-			.setName('Setting #1')
-			.setDesc('It\'s a secret')
+			.setName('Chess.com Username')
+			.setDesc('https://www.chess.com/member/xxxxx')
 			.addText(text => text
-				.setPlaceholder('Enter your secret')
-				.setValue(this.plugin.settings.mySetting)
+				.setPlaceholder('Enter your username')
+				.setValue(this.plugin.settings.chessUsername)
 				.onChange(async (value) => {
-					this.plugin.settings.mySetting = value;
+					this.plugin.settings.chessUsername = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Chess Games Folder')
+			.setDesc('./random/chessgames')
+			.addText(text => text
+				.setPlaceholder('Enter your folder location')
+				.setValue(this.plugin.settings.folder)
+				.onChange(async (value) => {
+					this.plugin.settings.folder = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Fetch Games Played After Year')
+			.setDesc('yyyy')
+			.addText(text => text
+				.setPlaceholder('Enter year')
+				.setValue(this.plugin.settings.gameLimitYear)
+				.onChange(async (value) => {
+					this.plugin.settings.gameLimitYear = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Fetch Games Played After Month')
+			.setDesc('mm')
+			.addText(text => text
+				.setPlaceholder('Enter month')
+				.setValue(this.plugin.settings.gameLimitMonth)
+				.onChange(async (value) => {
+					this.plugin.settings.gameLimitMonth = value;
 					await this.plugin.saveSettings();
 				}));
 	}

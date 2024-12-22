@@ -172,6 +172,11 @@ export default class MyPlugin extends Plugin {
 			}
 			const fileName = `${whiteMatch[1]}-${blackMatch[1]} ${UtcDate[1].split(".").join("-")} ${UtcTime[1]}.md`;
 			let mdFilePath = normalizePath(this.settings.folder + '/' + fileName);
+			// If file exists, skip it
+			if (await this.app.vault.adapter.exists(mdFilePath)) {
+				console.log(fileName, "exists");
+				continue;
+			}
 
 			// Write to file
 			await this.app.vault.adapter.write(mdFilePath, '```');

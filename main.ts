@@ -162,11 +162,15 @@ export default class MyPlugin extends Plugin {
 			const whiteMatch = game.match(/\[White\s+"(.+?)"\]/) as RegExpMatchArray;
 			const blackMatch = game.match(/\[Black\s+"(.+?)"\]/) as RegExpMatchArray;
 
+			// Extract date/time
+			const UtcDate = game.match(/\[UTCDate\s+"(.+?)"\]/) as RegExpMatchArray;
+			const UtcTime = game.match(/\[UTCTime\s+"(.+?)"\]/) as RegExpMatchArray;
+
 			// Generate filename
 			if (!await this.app.vault.adapter.exists(this.settings.folder)) {
 				await this.app.vault.adapter.mkdir(this.settings.folder);
 			}
-			const fileName = `${whiteMatch[1]}-${blackMatch[1]}.md`;
+			const fileName = `${whiteMatch[1]}-${blackMatch[1]} ${UtcDate[1].split(".").join("-")} ${UtcTime[1]}.md`;
 			let mdFilePath = normalizePath(this.settings.folder + '/' + fileName);
 
 			// Write to file

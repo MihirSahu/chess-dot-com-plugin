@@ -30,23 +30,28 @@ export default class MyPlugin extends Plugin {
 
 		// This creates an icon in the left ribbon.
 		const ribbonIconEl = this.addRibbonIcon('crown', 'Pull games', async (evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			this.setDate();
-			new Notice('Downloading games...');
-			//console.log("Current year/month:", this.settings.currentYear, this.settings.currentMonth);
-			//console.log("Game limit year/month:", this.settings.gameLimitYear, this.settings.gameLimitMonth);
-			const gameArchives = await this.fetchGameArchives();
-			for (let archive of gameArchives['archives']) {
-				const parsedDates = this.parseGameArchiveDates(archive);
-				if (this.satisfiesDateCondition(parsedDates)) {
-					//console.log(archive);
-					const pgnData = await this.fetchMonthlyGames(parsedDates[0], parsedDates[1]) as string;
-					await this.saveFileToPgnFolder(parsedDates[0], parsedDates[1], pgnData);
-					await this.savePgnSectionsToMd(pgnData);
+			try {
+				// Called when the user clicks the icon.
+				this.setDate();
+				new Notice('Downloading games...');
+				//console.log("Current year/month:", this.settings.currentYear, this.settings.currentMonth);
+				//console.log("Game limit year/month:", this.settings.gameLimitYear, this.settings.gameLimitMonth);
+				const gameArchives = await this.fetchGameArchives();
+				for (let archive of gameArchives['archives']) {
+					const parsedDates = this.parseGameArchiveDates(archive);
+					if (this.satisfiesDateCondition(parsedDates)) {
+						//console.log(archive);
+						const pgnData = await this.fetchMonthlyGames(parsedDates[0], parsedDates[1]) as string;
+						await this.saveFileToPgnFolder(parsedDates[0], parsedDates[1], pgnData);
+						await this.savePgnSectionsToMd(pgnData);
+					}
 				}
+				new Notice('Games downloaded');
 			}
-			new Notice('Games downloaded!');
-
+			catch (err) {
+				console.log(err);
+				new Notice("Games download failed. Try again later.");
+			}
 		});
 		// Perform additional things with the ribbon
 		ribbonIconEl.addClass('my-plugin-ribbon-class');
@@ -60,10 +65,16 @@ export default class MyPlugin extends Plugin {
 			id: 'import-pgn-to-lichess',
 			name: 'Import PGN into Lichess',
 			editorCallback: async (editor: Editor, view: MarkdownView) => {
-				const text = editor.getValue();
-				const pgn = this.getPgnFromMd(text);
-				const response = await this.importToLichess(pgn);
-				editor.setLine(editor.lastLine() + 1, '\n' + response.url);
+				try {
+					const text = editor.getValue();
+					const pgn = this.getPgnFromMd(text);
+					const response = await this.importToLichess(pgn);
+					editor.setLine(editor.lastLine() + 1, '\n' + response.url);
+				}
+				catch (err) {
+					console.log(err);
+					new Notice("Lichess import failed. Try again later.")
+				}
 			}
 		});
 		// This adds an editor command that can perform some operation on the current editor instance
@@ -211,7 +222,7 @@ export default class MyPlugin extends Plugin {
 		})
 
 		if (!response.ok) {
-			new Notice("Lichess import failed");
+			new Notice("Lichess unresponsive");
 			new Notice(response.statusText);
 		}
 

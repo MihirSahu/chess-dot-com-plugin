@@ -4,6 +4,7 @@ import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Set
 
 interface MyPluginSettings {
 	chessUsername: string;
+	lichessToken: string;
 	folder: string;
 	currentYear: string;
 	currentMonth: string;
@@ -13,6 +14,7 @@ interface MyPluginSettings {
 
 const DEFAULT_SETTINGS: MyPluginSettings = {
 	chessUsername: '',
+	lichessToken: '',
 	folder: '',
 	currentYear: '',
 	currentMonth: '',
@@ -43,6 +45,7 @@ export default class MyPlugin extends Plugin {
 					await this.savePgnSectionsToMd(pgnData);
 				}
 			}
+			new Notice('Games downloaded!');
 
 		});
 		// Perform additional things with the ribbon
@@ -54,10 +57,13 @@ export default class MyPlugin extends Plugin {
 
 		// This adds a simple command that can be triggered anywhere
 		this.addCommand({
-			id: 'open-sample-modal-simple',
-			name: 'Open sample modal (simple)',
-			callback: () => {
-				new SampleModal(this.app).open();
+			id: 'import-pgn-to-lichess',
+			name: 'Import PGN into Lichess',
+			editorCallback: async (editor: Editor, view: MarkdownView) => {
+				const text = editor.getValue();
+				const pgn = this.getPgnFromMd(text);
+				const response = await this.importToLichess(pgn);
+				editor.setLine(editor.lastLine() + 1, '\n' + response.url);
 			}
 		});
 		// This adds an editor command that can perform some operation on the current editor instance
@@ -174,15 +180,44 @@ export default class MyPlugin extends Plugin {
 			let mdFilePath = normalizePath(this.settings.folder + '/' + fileName);
 			// If file exists, skip it
 			if (await this.app.vault.adapter.exists(mdFilePath)) {
-				console.log(fileName, "exists");
+				//console.log(fileName, "exists");
 				continue;
 			}
 
 			// Write to file
 			await this.app.vault.adapter.write(mdFilePath, '```');
 			await this.app.vault.adapter.append(mdFilePath, game);
-			await this.app.vault.adapter.append(mdFilePath, '```');
+			await this.app.vault.adapter.append(mdFilePath, '\n```');
 		}
+	}
+
+	getPgnFromMd = (pgnData: string) => {
+		const pgn = pgnData.match(/```([\s\S]*?)```/) as RegExpMatchArray;
+		return pgn[1];
+	}
+
+	importToLichess = async (pgn: string) => {
+		const formBody = new URLSearchParams();
+		formBody.append('pgn', pgn);
+		const url = 'https://lichess.org/api/import';
+
+		const response = await fetch(url, {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/x-www-form-urlencoded',
+        'Authorization': `Bearer ${this.settings.lichessToken}`
+			},
+			body: formBody.toString(),
+		})
+
+		if (!response.ok) {
+			new Notice("Lichess import failed");
+			new Notice(response.statusText);
+		}
+
+		const result = await response.json();
+		new Notice("Lichess import successful");
+		return result;
 	}
 
 	setDate = () => {
@@ -275,6 +310,17 @@ class SampleSettingTab extends PluginSettingTab {
 				.setValue(this.plugin.settings.gameLimitMonth)
 				.onChange(async (value) => {
 					this.plugin.settings.gameLimitMonth = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Lichess API Token')
+			.setDesc('lip_xxxxxx')
+			.addText(text => text
+				.setPlaceholder('Enter API Token')
+				.setValue(this.plugin.settings.lichessToken)
+				.onChange(async (value) => {
+					this.plugin.settings.lichessToken = value;
 					await this.plugin.saveSettings();
 				}));
 	}
